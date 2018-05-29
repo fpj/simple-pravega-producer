@@ -1,24 +1,31 @@
 package com.dataartisans;
 
 import io.pravega.client.ClientFactory;
+import io.pravega.client.admin.ReaderGroupManager;
 import io.pravega.client.admin.StreamManager;
-import io.pravega.client.stream.EventStreamWriter;
-import io.pravega.client.stream.EventWriterConfig;
-import io.pravega.client.stream.ScalingPolicy;
-import io.pravega.client.stream.StreamConfiguration;
-import io.pravega.client.stream.impl.JavaSerializer;
+import io.pravega.client.netty.impl.ConnectionFactory;
+import io.pravega.client.netty.impl.ConnectionFactoryImpl;
+import io.pravega.client.stream.*;
+import io.pravega.client.stream.impl.*;
+import io.pravega.client.stream.notifications.Listener;
+import io.pravega.client.stream.notifications.Observable;
+import io.pravega.client.stream.notifications.SegmentNotification;
 import io.prometheus.client.Gauge;
-import io.prometheus.client.exporter.HTTPServer;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
-import sun.dc.pr.PRError;
 
 import java.net.URI;
+import java.util.Collections;
 import java.util.Scanner;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Pravega data producer
@@ -28,13 +35,16 @@ public class PravegaProducer {
     private static final String DEFAULT_SCOPE = "flinkScope";
     private static final String DEFAULT_CONTROLLER_URI = "tcp://localhost:9090";
     private static final String DEFAULT_STREAM_NAME = "flinkStream";
-    private static final int DEFAULT_PROMETHEUS_PORT = 5001;
+    private static final int DEFAULT_PROMETHEUS_PORT = 9093;
     private static final String PRAVEGA_PRODUCER_EVENT_RATE_PER_SECOND = "pravega_producer_event_rate_per_second";
+    private static final String PRAVEGA_NUM_OF_SEGMENTS = "pravega_num_of_segments";
 
     private static final Option scopeOption = new Option("s", "scope", true, "The scope (namespace) of the Stream to write to.");
     private static final Option streamOption = new Option("n", "name", true, "The name of the Stream to write to.");
     private static final Option controllerOption = new Option("u", "uri", true, "The URI to the Pravega controller in the form tcp://host:port");
     private static final Option prometheusPortOptions = new Option("p", "port", true, "The Prometheus port");
+
+    private static final AtomicInteger currentNumberOfSegments = new AtomicInteger(1);
 
     public static void main( String[] args ) throws Exception {
         final CommandLine commandLine = parseCommandLineArgs(getOptions(), args);
@@ -55,12 +65,16 @@ public class PravegaProducer {
                 streamName,
                 streamConfig);
 
+
         try (PrometheusReporter prometheusReporter = new PrometheusReporter(prometheusPort);
-             ClientFactory clientFactory = ClientFactory.withScope(scope, controllerURI);
+             ConnectionFactory connectionFactory = new ConnectionFactoryImpl(false);
+             ControllerImpl controller = new ControllerImpl(controllerURI,
+                     ControllerImplConfig.builder().build(),
+                     connectionFactory.getInternalExecutor());
+             ClientFactory clientFactory = new ClientFactoryImpl(scope, controller);
              EventStreamWriter<String> writer = clientFactory.createEventWriter(streamName,
                      new JavaSerializer<>(),
                      EventWriterConfig.builder().build())) {
-
             final EventProducer eventProducer = new EventProducer(writer, 2);
 
             prometheusReporter.registerMetric(
@@ -68,20 +82,28 @@ public class PravegaProducer {
                     "The event rate of the Pravega producer.",
                     createEventRateChild(eventProducer));
 
-            Thread producerThread = new Thread(eventProducer);
+            prometheusReporter.registerMetric(PRAVEGA_NUM_OF_SEGMENTS,
+                    "Number of segments of stream",
+                    createNumOfSegmentsChild(scope, streamName, controller));
 
-            producerThread.start();
+            ExecutorService executor = Executors.newSingleThreadExecutor();
+            executor.submit(eventProducer);
 
             final Scanner scanner = new Scanner(System.in);
+            boolean stop = false;
 
-            while (true) {
+            while (!stop) {
                 if (scanner.hasNextInt()) {
                     final int newRatePerSecond = scanner.nextInt();
                     eventProducer.setRatePerSecond(newRatePerSecond);
+                } else if (scanner.hasNext("exit")) {
+                    stop = true;
                 } else {
                     Thread.sleep(100L);
                 }
             }
+
+            executor.shutdown();
         }
     }
 
@@ -90,6 +112,24 @@ public class PravegaProducer {
             @Override
             public double get() {
                 return eventProducer.getRatePerSecond();
+            }
+        };
+    }
+
+    private static Gauge.Child createNumOfSegmentsChild(String scope, String streamName, Controller controller) {
+        return new Gauge.Child() {
+            @Override
+            public double get() {
+                int streamSize = 0;
+                try {
+                    streamSize = controller.getCurrentSegments(scope, streamName).get().getSegments().size();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } catch (ExecutionException e) {
+                    e.printStackTrace();
+                }
+
+                return streamSize;
             }
         };
     }
@@ -108,5 +148,14 @@ public class PravegaProducer {
         CommandLineParser parser = new DefaultParser();
         CommandLine cmd = parser.parse(options, args);
         return cmd;
+    }
+
+    private static class ListenerImpl implements Listener<SegmentNotification> {
+
+        @Override
+        public void onNotification(SegmentNotification notification) {
+            currentNumberOfSegments.set(notification.getNumOfSegments());
+            System.out.println("Num of segments updated: " + notification.getNumOfSegments());
+        }
     }
 }
