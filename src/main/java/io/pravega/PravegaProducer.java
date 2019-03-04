@@ -1,14 +1,12 @@
-package com.dataartisans;
+package io.pravega;
 
 import io.pravega.client.ClientFactory;
-import io.pravega.client.admin.ReaderGroupManager;
 import io.pravega.client.admin.StreamManager;
 import io.pravega.client.netty.impl.ConnectionFactory;
 import io.pravega.client.netty.impl.ConnectionFactoryImpl;
 import io.pravega.client.stream.*;
 import io.pravega.client.stream.impl.*;
 import io.pravega.client.stream.notifications.Listener;
-import io.pravega.client.stream.notifications.Observable;
 import io.pravega.client.stream.notifications.SegmentNotification;
 import io.prometheus.client.Gauge;
 import org.apache.commons.cli.CommandLine;
@@ -19,12 +17,10 @@ import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 
 import java.net.URI;
-import java.util.Collections;
 import java.util.Scanner;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**

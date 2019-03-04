@@ -1,4 +1,4 @@
-package com.dataartisans;
+package io.pravega;
 
 import io.prometheus.client.Gauge;
 import io.prometheus.client.exporter.HTTPServer;

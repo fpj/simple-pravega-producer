@@ -1,4 +1,4 @@
-package com.dataartisans;
+package io.pravega;
 
 import io.pravega.client.stream.EventStreamWriter;
 

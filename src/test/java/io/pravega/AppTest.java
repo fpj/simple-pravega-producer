@@ -1,4 +1,4 @@
-package com.dataartisans;
+package io.pravega;
 
 import junit.framework.Test;
 import junit.framework.TestCase;
