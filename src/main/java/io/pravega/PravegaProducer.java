@@ -1,5 +1,6 @@
 package io.pravega;
 
+import io.pravega.client.ClientConfig;
 import io.pravega.client.ClientFactory;
 import io.pravega.client.admin.StreamManager;
 import io.pravega.client.netty.impl.ConnectionFactory;
@@ -60,12 +61,12 @@ public class PravegaProducer {
                 scope,
                 streamName,
                 streamConfig);
-
+        final ClientConfig config = ClientConfig.builder().controllerURI(controllerURI).build();
 
         try (PrometheusReporter prometheusReporter = new PrometheusReporter(prometheusPort);
-             ConnectionFactory connectionFactory = new ConnectionFactoryImpl(false);
-             ControllerImpl controller = new ControllerImpl(controllerURI,
-                     ControllerImplConfig.builder().build(),
+             ConnectionFactory connectionFactory = new ConnectionFactoryImpl(config);
+             ControllerImpl controller = new ControllerImpl(
+                     ControllerImplConfig.builder().clientConfig(config).build(),
                      connectionFactory.getInternalExecutor());
              ClientFactory clientFactory = new ClientFactoryImpl(scope, controller);
              EventStreamWriter<String> writer = clientFactory.createEventWriter(streamName,
